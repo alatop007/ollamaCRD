@@ -5,7 +5,6 @@ from kubernetes.client import (
     V1Pod, V1ObjectMeta, V1PodSpec, V1Container, V1EnvVar,
     V1Volume, V1VolumeMount, V1EmptyDirVolumeSource
 )
-
 kubernetes.config.load_incluster_config()
 core_api = kubernetes.client.CoreV1Api()
 
@@ -29,25 +28,21 @@ def create_fn(spec, name, namespace, logger, **kwargs):
     model_name = spec.get('modelName')
     if not model_name:
         raise kopf.PermanentError("modelName must be specified in spec")
-
     service_pod = create_ollama_service_pod(name, namespace)
     try:
         core_api.create_namespaced_pod(namespace=namespace, body=service_pod)
     except kubernetes.client.rest.ApiException as e:
         if e.status != 409: 
             raise kopf.PermanentError(f"Failed to create service pod: {e}")
-
     logger.info(f"Waiting for Ollama service pod {service_pod.metadata.name} to be ready...")
     if not wait_for_pod_ready(service_pod.metadata.name, namespace):
         raise kopf.PermanentError("Timeout waiting for Ollama service pod to be ready")
-
     pull_pod = create_ollama_pull_pod(name, namespace, model_name)
     try:
         core_api.create_namespaced_pod(namespace=namespace, body=pull_pod)
     except kubernetes.client.rest.ApiException as e:
         if e.status != 409: 
             raise kopf.PermanentError(f"Failed to create pull pod: {e}")
-    
     return {
         'service_pod': service_pod.metadata.name,
         'pull_pod': pull_pod.metadata.name
@@ -105,7 +100,8 @@ def create_ollama_pull_pod(name, namespace, model_name):
                     image='ollama/ollama:latest',
                     command=['sh', '-c'],
                     args=[
-                        f'until curl -s http://ollama-service-{name}:11434/api/version; do echo waiting for ollama service; sleep 2; done; '
+                        'apt-get update && apt-get install -y curl && '
+                        f'until curl -s http://ollama-service-{name}:11434/api/version; do echo waiting for ollama service; sleep 2; done && '
                         f'ollama pull {model_name}'
                     ],
                     env=[
