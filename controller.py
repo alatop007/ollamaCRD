@@ -45,22 +45,14 @@ def create_fn(spec, name, namespace, logger, **kwargs):
     if not wait_for_pod_ready(service_pod.metadata.name, namespace):
         raise kopf.PermanentError("Timeout waiting for Ollama service pod to be ready")
     
-    # Create the pull pod
-    pull_pod = create_ollama_pull_pod(name, namespace, model_name)
-    try:
-        core_api.create_namespaced_pod(namespace=namespace, body=pull_pod)
-    except kubernetes.client.rest.ApiException as e:
-        if e.status != 409:  # Ignore if pod already exists
-            raise kopf.PermanentError(f"Failed to create pull pod: {e}")
-    
     # Return status
     return {
-        'service_pod': service_pod.metadata.name,
-        'pull_pod': pull_pod.metadata.name
+        'service_pod': service_pod.metadata.name
     }
 
-def create_ollama_service_pod(name, namespace):
+def create_ollama_service_pod(name, namespace, model_name):
     """Create a pod running the Ollama service."""
+    service_host = f"ollama-service-{name}"
     return V1Pod(
         metadata=V1ObjectMeta(
             name=f"ollama-service-{name}",
@@ -82,40 +74,6 @@ def create_ollama_service_pod(name, namespace):
                             mount_path='/root/.ollama'
                         )
                     ],
-                    env=[
-                        V1EnvVar(
-                            name='OLLAMA_HOST',
-                            value='0.0.0.0'
-                        )
-                    ]
-                )
-            ],
-            volumes=[
-                V1Volume(
-                    name='ollama-data',
-                    empty_dir=V1EmptyDirVolumeSource()
-                )
-            ]
-        )
-    )
-
-def create_ollama_pull_pod(name, namespace, model_name):
-    """Create a pod for pulling the Ollama model."""
-    service_host = f"ollama-service-{name}"
-    return V1Pod(
-        metadata=V1ObjectMeta(
-            name=f"ollama-pull-{name}",
-            namespace=namespace,
-            labels={
-                'app': 'ollama-pull',
-                'model': name
-            }
-        ),
-        spec=V1PodSpec(
-            containers=[
-                V1Container(
-                    name='ollama-pull',
-                    image='ollama/ollama:latest',
                     command=['sh', '-c'],
                     args=[
                         'apt-get update && apt-get install -y curl && '
@@ -133,14 +91,19 @@ def create_ollama_pull_pod(name, namespace, model_name):
                     ]
                 )
             ],
-            restart_policy='OnFailure'
+            volumes=[
+                V1Volume(
+                    name='ollama-data',
+                    empty_dir=V1EmptyDirVolumeSource()
+                )
+            ]
         )
     )
 
 @kopf.on.delete('example.com', 'v1', 'ollamamodels')
 def delete_fn(spec, name, namespace, logger, **kwargs):
     # Clean up both pods if they exist
-    for pod_name in [f"ollama-pull-{name}", f"ollama-service-{name}"]:
+    for pod_name in [f"ollama-service-{name}"]:
         try:
             core_api.delete_namespaced_pod(
                 name=pod_name,
