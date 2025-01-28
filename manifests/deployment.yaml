@@ -17,7 +17,7 @@ spec:
       serviceAccountName: ollama-operator
       containers:
       - name: operator
-        image: webcodes0071/ollama-operator:latest
+        image: webcodes0071/ollama-operator:v5
         imagePullPolicy: Always
         resources:
           limits: 
