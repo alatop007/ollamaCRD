@@ -17,7 +17,7 @@ spec:
       serviceAccountName: ollama-operator
       containers:
       - name: operator
-        image: webcodes0071/ollama-operator:v5
+        image: webcodes0071/ollama-operator:v8
         imagePullPolicy: Always
         resources:
           limits: 
@@ -74,7 +74,7 @@ roleRef:
 apiVersion: v1
 kind: Service
 metadata:
-  name: ollama-service-mistral
+  name: ollama-service
 spec:
   selector:
     app: ollama-service

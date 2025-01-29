@@ -1,6 +1,6 @@
 apiVersion: example.com/v1
 kind: OllamaModel
 metadata:
-  name: llama3.2
+  name: deepseek
 spec:
-  modelName: llama3.2:1b
+  modelName: deepseek-r1:1.5b
