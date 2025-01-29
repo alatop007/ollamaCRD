@@ -6,42 +6,26 @@ from kubernetes.client import (
     V1ObjectMeta,
     V1PodSpec,
     V1Container,
-    V1EnvVar,
+    V1ContainerPort,
     V1Volume,
     V1VolumeMount,
     V1EmptyDirVolumeSource,
-    V1ContainerPort
+    V1EnvVar,
+    ApiException
 )
 
-# Configure Kubernetes client
+# Initialize Kubernetes client
 kubernetes.config.load_incluster_config()
 core_api = kubernetes.client.CoreV1Api()
 
-def wait_for_pod_ready(name, namespace, timeout=300):
-    """Wait for a pod to be ready."""
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            pod = core_api.read_namespaced_pod(name=name, namespace=namespace)
-            if pod.status.phase == 'Running':
-                for container_status in pod.status.container_statuses:
-                    if container_status.ready:
-                        return True
-        except kubernetes.client.rest.ApiException:
-            pass
-        time.sleep(5)
-    return False
-
-def create_ollama_service_pod(name, namespace, model_name):
-    """Create a pod running the Ollama service."""
-    service_host = f"ollama-service-{name}"
-    
+def create_ollama_pod(name, namespace, model_name):
+    """Create a pod running Ollama service that pulls the model on startup."""
     return V1Pod(
         metadata=V1ObjectMeta(
-            name=f"ollama-service-{name}",
+            name=f"ollama-{name}",
             namespace=namespace,
             labels={
-                'app': 'ollama-service',
+                'app': 'ollama',
                 'model': name
             }
         ),
@@ -54,24 +38,42 @@ def create_ollama_service_pod(name, namespace, model_name):
                     volume_mounts=[
                         V1VolumeMount(
                             name='ollama-data',
-                            mount_path='/root/.ollama'
+                            mount_path='/root/.ollama'  # Changed back to /root
                         )
                     ],
                     command=['sh', '-c'],
                     args=[
-                        'apt-get update && apt-get install -y curl && '
-                        f'until curl -s http://{service_host}:11434/api/version; do echo "waiting for ollama service"; sleep 2; done && '
-                        'echo "Service is ready, starting pull..." && '
-                        f'export OLLAMA_HOST=http://{service_host}:11434 && '
-                        f'echo "Using OLLAMA_HOST=$OLLAMA_HOST" && '
-                        f'ollama pull {model_name}'
+                        'ollama serve & '
+                        f'sleep 5 && '
+                        f'ollama pull {model_name} && '
+                        f'wait'
                     ],
-                    env=[
-                        V1EnvVar(
-                            name='OLLAMA_HOST',
-                            value=f'http://{service_host}:11434'
-                        )
-                    ]
+                    resources={
+                        'requests': {
+                            'cpu': '500m',
+                            'memory': '1Gi'
+                        },
+                        'limits': {
+                            'cpu': '2',
+                            'memory': '4Gi'
+                        }
+                    },
+                    readiness_probe={
+                        'httpGet': {
+                            'path': '/api/version',
+                            'port': 11434
+                        },
+                        'initialDelaySeconds': 5,
+                        'periodSeconds': 10
+                    },
+                    liveness_probe={
+                        'httpGet': {
+                            'path': '/api/version',
+                            'port': 11434
+                        },
+                        'initialDelaySeconds': 15,
+                        'periodSeconds': 20
+                    }
                 )
             ],
             volumes=[
@@ -79,56 +81,128 @@ def create_ollama_service_pod(name, namespace, model_name):
                     name='ollama-data',
                     empty_dir=V1EmptyDirVolumeSource()
                 )
-            ]
+            ],
+            security_context={
+                'runAsUser': 0,  # Run as root
+                'runAsGroup': 0,
+                'fsGroup': 0,
+                'runAsNonRoot': False  # Allow running as root
+            }
         )
     )
 
+
+def get_pod_status(name, namespace):
+    """Get the current status of a pod."""
+    try:
+        pod = core_api.read_namespaced_pod(name=name, namespace=namespace)
+        return {
+            'phase': pod.status.phase,
+            'ready': all(
+                container.ready 
+                for container in (pod.status.container_statuses or [])
+            )
+        }
+    except ApiException as e:
+        if e.status == 404:
+            return {'phase': 'NotFound', 'ready': False}
+        raise
+
+def wait_for_pod_ready(name, namespace, timeout=300):
+    """Wait for a pod to be ready with exponential backoff."""
+    start = time.time()
+    backoff = 1
+    max_backoff = 32
+
+    while time.time() - start < timeout:
+        try:
+            status = get_pod_status(name, namespace)
+            if status['phase'] == 'Running' and status['ready']:
+                return True
+            
+            if status['phase'] in ['Failed', 'Unknown']:
+                return False
+                
+        except ApiException as e:
+            if e.status != 404:
+                raise
+        
+        time.sleep(min(backoff, max_backoff))
+        backoff *= 2
+    
+    return False
+
 @kopf.on.create('example.com', 'v1', 'ollamamodels')
-def create_fn(body, spec, status, name, namespace, logger, **kwargs):
-    """Handler for creating OllamaModel resources."""
-    # Initialize status if it doesn't exist
-    if not status:
-        status = {}
-
-    # Extract model name from spec
-    model_name = spec.get('modelName')
-    if not model_name:
-        raise kopf.PermanentError("modelName must be specified in spec")
-
-    # Create the Ollama service pod
-    service_pod = create_ollama_service_pod(name, namespace, model_name)
+def create_fn(spec, name, namespace, logger, patch, **kwargs):
     try:
-        created_pod = core_api.create_namespaced_pod(namespace=namespace, body=service_pod)
-    except kubernetes.client.rest.ApiException as e:
-        if e.status != 409:  # Ignore if pod already exists
-            raise kopf.PermanentError(f"Failed to create service pod: {e}")
-        return
+        model_name = spec.get('modelName')
+        if not model_name:
+            raise kopf.PermanentError("modelName must be specified in spec")
 
-    # Wait for service pod to be ready
-    logger.info(f"Waiting for Ollama service pod {service_pod.metadata.name} to be ready...")
-    if not wait_for_pod_ready(service_pod.metadata.name, namespace):
-        raise kopf.PermanentError("Timeout waiting for Ollama service pod to be ready")
+        pod = create_ollama_pod(name, namespace, model_name)
+        
+        try:
+            created_pod = core_api.create_namespaced_pod(
+                namespace=namespace, 
+                body=pod
+            )
+            
+            patch.status['phase'] = 'Creating'
+            patch.status['pod_name'] = created_pod.metadata.name
+            patch.status['model'] = model_name
+            
+        except ApiException as e:
+            if e.status == 409:
+                logger.info(f"Pod {pod.metadata.name} already exists")
+                patch.status['phase'] = 'Exists'
+                return
+            raise kopf.PermanentError(f"Failed to create pod: {e}")
 
-    # Safely patch the status
-    try:
-        return {'status': {'pod_name': created_pod.metadata.name}}
+        if not wait_for_pod_ready(pod.metadata.name, namespace):
+            try:
+                core_api.delete_namespaced_pod(
+                    name=pod.metadata.name,
+                    namespace=namespace
+                )
+            except ApiException:
+                pass
+            patch.status['phase'] = 'Failed'
+            raise kopf.PermanentError("Timeout waiting for Ollama pod to be ready")
+
+        patch.status['phase'] = 'Running'
+        patch.status['ready'] = True
+
     except Exception as e:
-        logger.error(f"Failed to patch status: {e}")
-        raise kopf.PermanentError("Failed to patch resource status")
+        logger.error(f"Unexpected error: {e}")
+        patch.status['phase'] = 'Error'
+        patch.status['error'] = str(e)
+        raise kopf.PermanentError(f"Failed to create Ollama model: {str(e)}")
+
+@kopf.on.update('example.com', 'v1', 'ollamamodels')
+def update_fn(spec, name, namespace, logger, patch, **kwargs):
+    """Handle updates to the OllamaModel resource."""
+    pod_name = f"ollama-{name}"
+    try:
+        current_status = get_pod_status(pod_name, namespace)
+        patch.status['phase'] = current_status['phase']
+        patch.status['ready'] = current_status['ready']
+    except ApiException as e:
+        logger.error(f"Error updating status: {e}")
+        patch.status['phase'] = 'Error'
+        patch.status['error'] = str(e)
 
 @kopf.on.delete('example.com', 'v1', 'ollamamodels')
 def delete_fn(spec, name, namespace, logger, **kwargs):
     """Handler for deleting OllamaModel resources."""
-    pod_name = f"ollama-service-{name}"
+    pod_name = f"ollama-{name}"
     try:
         core_api.delete_namespaced_pod(
             name=pod_name,
             namespace=namespace
         )
         logger.info(f"Deleted pod {pod_name}")
-    except kubernetes.client.rest.ApiException as e:
-        if e.status != 404:  # Ignore if pod is already deleted
-            logger.warning(f"Pod {pod_name} not found or already deleted: {e}")
-        else:
+    except ApiException as e:
+        if e.status != 404:
             logger.error(f"Error deleting pod {pod_name}: {e}")
             raise
+        logger.warning(f"Pod {pod_name} not found or already deleted")
