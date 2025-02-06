@@ -8,3 +8,4 @@ Todo
 6. helm chart
 7. make value.yaml deployment and able to specify replicas
 8. ability to run local image and not pull from internet
+9. model service as a deployment

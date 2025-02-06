@@ -23,8 +23,88 @@ spec:
               properties:
                 modelName:
                   type: string
+                image:
+                  type: string
+                probes:
+                  type: object
+                  properties:
+                    readiness:
+                      type: object
+                      properties:
+                        initialDelaySeconds:
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                    liveness:
+                      type: object
+                      properties:
+                        initialDelaySeconds:
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                volumeMounts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      mountPath:
+                        type: string
+                replicas:
+                  type: integer
+                  minimum: 1
+                serviceType:
+                  type: string
+                  enum: ["ClusterIP", "NodePort", "LoadBalancer"]
             status:
               type: object
-              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase:
+                  type: string
+                ready:
+                  type: boolean
+                pod_name:
+                  type: string
+                model:
+                  type: string
+                error:
+                  type: string
+                created_at:
+                  type: string
+                last_updated:
+                  type: string
+                last_error_time:
+                  type: string
+      additionalPrinterColumns:
+        - name: Model
+          type: string
+          jsonPath: .spec.modelName
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       subresources:
         status: {}
