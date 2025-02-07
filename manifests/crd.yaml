@@ -8,6 +8,8 @@ spec:
     kind: OllamaModel
     plural: ollamamodels
     singular: ollamamodel
+    shortNames:
+      - om
   scope: Namespaced
   versions:
     - name: v1
@@ -23,8 +25,101 @@ spec:
               properties:
                 modelName:
                   type: string
+                replicas:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                service:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: ["ClusterIP", "NodePort", "LoadBalancer"]
+                      default: "ClusterIP"
+                    port:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                      default: 11434
+                    name:
+                      type: string
+                  default:
+                    type: "ClusterIP"
+                    port: 11434
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                image:
+                  type: string
+                probes:
+                  type: object
+                  properties:
+                    readiness:
+                      type: object
+                      properties:
+                        initialDelaySeconds:
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                    liveness:
+                      type: object
+                      properties:
+                        initialDelaySeconds:
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                volumeMounts:
+                  type: array
+                  items:
+                    type: object
+                    required: ["name", "mountPath"]
+                    properties:
+                      name:
+                        type: string
+                      mountPath:
+                        type: string
             status:
               type: object
-              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase:
+                  type: string
+                ready:
+                  type: boolean
+                pod_name:
+                  type: string
+                model:
+                  type: string
+                error:
+                  type: string
+                created_at:
+                  type: string
+                last_updated:
+                  type: string
+                last_error_time:
+                  type: string
+      additionalPrinterColumns:
+        - name: Model
+          type: string
+          jsonPath: .spec.modelName
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       subresources:
         status: {}

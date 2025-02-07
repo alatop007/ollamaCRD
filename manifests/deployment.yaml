@@ -17,15 +17,15 @@ spec:
       serviceAccountName: ollama-operator
       containers:
       - name: operator
-        image: webcodes0071/ollama-operator:v8
+        image: webcodes0071/ollama-operator:v0.0.1
         imagePullPolicy: Always
         resources:
           limits: 
-            cpu: "1"
-            memory: "1Gi" 
+            cpu: "250m"
+            memory: "128Mi" 
           requests: 
             cpu: "250m"   
-            memory: "256Mi"
+            memory: "128Mi"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -43,8 +43,12 @@ rules:
   verbs: ["get", "list", "watch"]
 
 - apiGroups: [""]
-  resources: ["pods"]
+  resources: ["pods", "services"]
   verbs: ["create", "delete", "get", "list", "watch", "patch"]
+
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
 - apiGroups: ["example.com"]
   resources: ["ollamamodels"]
@@ -70,16 +74,3 @@ roleRef:
   kind: ClusterRole
   name: ollama-operator
   apiGroup: rbac.authorization.k8s.io
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ollama-service
-spec:
-  selector:
-    app: ollama-service
-    model: mistral
-  ports:
-    - protocol: TCP
-      port: 11434
-      targetPort: 11434

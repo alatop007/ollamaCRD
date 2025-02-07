@@ -3,4 +3,27 @@ kind: OllamaModel
 metadata:
   name: deepseek
 spec:
-  modelName: deepseek-r1:1.5b
+  modelName: deepseek-coder:33b
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 11434
+    name: deepseek-service
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  image: "ollama/ollama:latest"
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+  volumeMounts:
+    - name: ollama-data
+      mountPath: "/root/.ollama"

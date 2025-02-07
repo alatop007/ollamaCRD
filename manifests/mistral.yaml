@@ -4,3 +4,23 @@ metadata:
   name: mistral
 spec:
   modelName: mistral
+  replicas: 1
+  serviceType: ClusterIP
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  image: "ollama/ollama:latest"
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+  volumeMounts:
+    - name: ollama-data
+      mountPath: "/root/.ollama"
