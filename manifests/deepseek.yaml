@@ -5,14 +5,17 @@ metadata:
 spec:
   modelName: deepseek-coder:33b
   replicas: 1
-  serviceType: ClusterIP
+  service:
+    type: ClusterIP
+    port: 11434
+    name: deepseek-service
   resources:
     requests:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "500m"
+      memory: "256Mi"
     limits:
-      cpu: "2"
-      memory: "4Gi"
+      cpu: "500m"
+      memory: "256Mi"
   image: "ollama/ollama:latest"
   probes:
     readiness:

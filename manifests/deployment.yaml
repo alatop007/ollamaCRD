@@ -17,15 +17,15 @@ spec:
       serviceAccountName: ollama-operator
       containers:
       - name: operator
-        image: webcodes0071/ollama-operator:v2
+        image: webcodes0071/ollama-operator:v0.0.1
         imagePullPolicy: Always
         resources:
           limits: 
-            cpu: "1"
-            memory: "1Gi" 
+            cpu: "250m"
+            memory: "128Mi" 
           requests: 
             cpu: "250m"   
-            memory: "256Mi"
+            memory: "128Mi"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -74,16 +74,3 @@ roleRef:
   kind: ClusterRole
   name: ollama-operator
   apiGroup: rbac.authorization.k8s.io
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ollama-service
-spec:
-  selector:
-    app: ollama-service
-    model: mistral
-  ports:
-    - protocol: TCP
-      port: 11434
-      targetPort: 11434

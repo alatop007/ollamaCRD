@@ -2,6 +2,7 @@ import kopf
 import kubernetes
 import time
 import logging
+import re
 from kubernetes.client import (
     V1Pod,
     V1ObjectMeta,
@@ -26,15 +27,38 @@ kubernetes.config.load_incluster_config()
 core_api = kubernetes.client.CoreV1Api()
 apps_api = kubernetes.client.AppsV1Api()
 
+def sanitize_label(value):
+    """Sanitize a value to be used as a Kubernetes label.
+    Only allows alphanumeric characters, '-', '_' or '.'"""
+    # Replace invalid characters with '-'
+    sanitized = re.sub(r'[^a-zA-Z0-9\-_\.]', '-', value)
+    # Ensure it starts and ends with alphanumeric
+    if not sanitized[0].isalnum():
+        sanitized = 'x' + sanitized
+    if not sanitized[-1].isalnum():
+        sanitized = sanitized + 'x'
+    return sanitized
+
 def create_ollama_deployment(name, namespace, spec):
     """Create a deployment and service for Ollama."""
     model_name = spec['modelName']
     replicas = spec.get('replicas', 1)
     
+    # Sanitize model name for use in labels
+    sanitized_model_name = sanitize_label(model_name)
+    sanitized_name = sanitize_label(name)
+    
     # Get configurations with defaults
     resources = spec.get('resources', {
         'requests': {'cpu': '500m', 'memory': '1Gi'},
         'limits': {'cpu': '2', 'memory': '4Gi'}
+    })
+    
+    # Get service configurations
+    service_config = spec.get('service', {
+        'type': 'ClusterIP',
+        'port': 11434,
+        'name': f"ollama-{sanitized_name}-{sanitized_model_name}"
     })
     
     image = spec.get('image', 'ollama/ollama:latest')
@@ -57,15 +81,23 @@ def create_ollama_deployment(name, namespace, spec):
     # Create labels that will be used by both deployment and service
     labels = {
         'app': 'ollama',
-        'model': name
+        'model': sanitized_name,
+        'modelName': sanitized_model_name
     }
+
+    # Create a service name from config or use default
+    service_name = service_config.get('name', f"ollama-{sanitized_name}-{sanitized_model_name}")
 
     # Define the deployment
     deployment = V1Deployment(
         metadata=V1ObjectMeta(
-            name=f"ollama-{name}",
+            name=f"ollama-{sanitized_name}",
             namespace=namespace,
-            labels=labels
+            labels=labels,
+            annotations={
+                'originalModelName': model_name,
+                'modelInstance': name
+            }
         ),
         spec=V1DeploymentSpec(
             replicas=replicas,
@@ -73,7 +105,12 @@ def create_ollama_deployment(name, namespace, spec):
                 match_labels=labels
             ),
             template={
-                'metadata': {'labels': labels},
+                'metadata': {
+                    'labels': labels,
+                    'annotations': {
+                        'originalModelName': model_name
+                    }
+                },
                 'spec': {
                     'containers': [{
                         'name': 'ollama',
@@ -130,21 +167,25 @@ def create_ollama_deployment(name, namespace, spec):
     # Define the service
     service = V1Service(
         metadata=V1ObjectMeta(
-            name=f"ollama-{name}",
+            name=service_name,
             namespace=namespace,
-            labels=labels
+            labels=labels,
+            annotations={
+                'originalModelName': model_name,
+                'modelInstance': name
+            }
         ),
         spec=V1ServiceSpec(
             selector=labels,
             ports=[
                 V1ServicePort(
-                    port=11434,
+                    port=service_config.get('port', 11434),
                     target_port=11434,
                     protocol='TCP',
                     name='http'
                 )
             ],
-            type=spec.get('serviceType', 'ClusterIP')
+            type=service_config.get('type', 'ClusterIP')
         )
     )
 
@@ -257,7 +298,6 @@ def create_fn(spec, name, namespace, logger, patch, **kwargs):
         logger.info(f"Creating Ollama deployment for model {spec['modelName']}")
         
         # Create both deployment and service
-        apps_api = kubernetes.client.AppsV1Api()
         deployment, service = create_ollama_deployment(name, namespace, spec)
         
         try:
@@ -268,7 +308,7 @@ def create_fn(spec, name, namespace, logger, patch, **kwargs):
             )
             logger.info(f"Created deployment {created_deployment.metadata.name}")
             
-            # Create the service
+            # Create the service with model-specific name
             created_service = core_api.create_namespaced_service(
                 namespace=namespace,
                 body=service
@@ -325,7 +365,7 @@ def update_fn(spec, name, namespace, logger, patch, **kwargs):
 def delete_fn(spec, name, namespace, logger, **kwargs):
     """Handler for deleting OllamaModel resources."""
     deployment_name = f"ollama-{name}"
-    service_name = f"ollama-{name}"
+    service_name = f"ollama-{name}-{spec['modelName']}"
     
     try:
         # Delete deployment using apps_api

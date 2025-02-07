@@ -1,6 +1,29 @@
 apiVersion: example.com/v1
 kind: OllamaModel
 metadata:
-  name: llama3.2
+  name: llama2
 spec:
-  modelName: llama3.2:1b
+  modelName: llama2:13b
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 11434
+    name: llama2-service
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "500m"
+      memory: "2Gi"
+  image: "ollama/ollama:latest"
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+  volumeMounts:
+    - name: ollama-data
+      mountPath: "/root/.ollama"

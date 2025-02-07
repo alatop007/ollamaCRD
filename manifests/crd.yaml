@@ -8,6 +8,8 @@ spec:
     kind: OllamaModel
     plural: ollamamodels
     singular: ollamamodel
+    shortNames:
+      - om
   scope: Namespaced
   versions:
     - name: v1
@@ -23,6 +25,44 @@ spec:
               properties:
                 modelName:
                   type: string
+                replicas:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                service:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: ["ClusterIP", "NodePort", "LoadBalancer"]
+                      default: "ClusterIP"
+                    port:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                      default: 11434
+                    name:
+                      type: string
+                  default:
+                    type: "ClusterIP"
+                    port: 11434
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
                 image:
                   type: string
                 probes:
@@ -42,38 +82,16 @@ spec:
                           type: integer
                         periodSeconds:
                           type: integer
-                resources:
-                  type: object
-                  properties:
-                    requests:
-                      type: object
-                      properties:
-                        cpu:
-                          type: string
-                        memory:
-                          type: string
-                    limits:
-                      type: object
-                      properties:
-                        cpu:
-                          type: string
-                        memory:
-                          type: string
                 volumeMounts:
                   type: array
                   items:
                     type: object
+                    required: ["name", "mountPath"]
                     properties:
                       name:
                         type: string
                       mountPath:
                         type: string
-                replicas:
-                  type: integer
-                  minimum: 1
-                serviceType:
-                  type: string
-                  enum: ["ClusterIP", "NodePort", "LoadBalancer"]
             status:
               type: object
               properties:
@@ -97,12 +115,9 @@ spec:
         - name: Model
           type: string
           jsonPath: .spec.modelName
-        - name: Status
-          type: string
-          jsonPath: .status.phase
-        - name: Ready
-          type: boolean
-          jsonPath: .status.ready
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
