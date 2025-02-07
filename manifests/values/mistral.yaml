@@ -5,7 +5,10 @@ metadata:
 spec:
   modelName: mistral
   replicas: 1
-  serviceType: ClusterIP
+  service:
+    type: ClusterIP
+    port: 11434
+    name: llama2-service
   resources:
     requests:
       cpu: "1"

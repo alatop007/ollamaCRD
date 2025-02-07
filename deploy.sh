@@ -1,10 +1,12 @@
 #!/bin/bash
-export IMAGE_TAG="v0.0.1"        
+# Configuration vars
+export IMAGE_TAG="v0.0.2"        
 export NAMESPACE="default"       
 export MODELS="deepseek,llama"  
 export PORT="11435"              
 export MODEL_FOR_PORT_FORWARD="deepseek" 
 export ENABLE_PORT_FORWARD="false" 
+export KUBECONFIG=${KUBECONFIG:-"$HOME/.kube/config"} 
 
 IMAGE_REGISTRY="webcodes0071"
 IMAGE_NAME="ollama-operator"
@@ -15,7 +17,6 @@ PORT=${PORT:-"11434"}
 MODEL_FOR_PORT_FORWARD=${MODEL_FOR_PORT_FORWARD:-"deepseek"}
 ENABLE_PORT_FORWARD=${ENABLE_PORT_FORWARD:-"false"}
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -33,7 +34,10 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Function to check if command exists
+kubectl_cmd() {
+    kubectl --kubeconfig="${KUBECONFIG}" "$@"
+}
+
 check_command() {
     if ! command -v $1 &> /dev/null; then
         print_error "$1 is required but not installed."
@@ -41,9 +45,14 @@ check_command() {
     fi
 }
 
+# Check required commands and kubeconfig
 check_command docker
 check_command kubectl
 
+if [ ! -f "${KUBECONFIG}" ]; then
+    print_error "KUBECONFIG file not found at ${KUBECONFIG}"
+    exit 1
+fi
 
 build_and_push() {
     print_status "Building Docker image ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
@@ -66,13 +75,16 @@ build_and_push() {
 # Deploy Kubernetes resources
 deploy_resources() {
     print_status "Deploying CRD"
-    kubectl apply -f manifests/crd.yaml
+    kubectl_cmd apply -f manifests/operators/crd.yaml
+
+    print_status "Setting up RBAC"
+    kubectl_cmd apply -f manifests/operators/rbac.yaml
 
     print_status "Deploying operator"
-    kubectl apply -f manifests/deployment.yaml
+    kubectl_cmd apply -f manifests/operators/deployment.yaml
     print_status "Waiting for operator pod to be ready..."
     while true; do
-        POD_STATUS=$(kubectl get pods -l app=ollama-operator -n default -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
+        POD_STATUS=$(kubectl_cmd get pods -l app=ollama-operator -n default -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
         if [ "$POD_STATUS" = "Running" ]; then
             print_status "Operator pod is running"
             break
@@ -86,11 +98,11 @@ deploy_resources() {
     # Deploy selected models
     IFS=',' read -ra MODEL_ARRAY <<< "$MODELS"
     for model in "${MODEL_ARRAY[@]}"; do
-        if [ -f "manifests/${model}.yaml" ]; then
+        if [ -f "manifests/values/${model}.yaml" ]; then
             print_status "Deploying ${model} model"
-            kubectl apply -f manifests/${model}.yaml
+            kubectl_cmd apply -f manifests/values/${model}.yaml
         else
-            print_warning "Model file manifests/${model}.yaml not found"
+            print_warning "Model file manifests/values/${model}.yaml not found"
         fi
     done
 }
@@ -100,7 +112,7 @@ setup_port_forward() {
     if [ "${ENABLE_PORT_FORWARD}" = "true" ]; then
         print_status "Setting up port forwarding for ${MODEL_FOR_PORT_FORWARD} model"
         print_status "Port forwarding will be set to ${PORT}"
-        kubectl port-forward pods/ollama-${MODEL_FOR_PORT_FORWARD} ${PORT}:${PORT} -n ${NAMESPACE}
+        kubectl_cmd port-forward pods/ollama-${MODEL_FOR_PORT_FORWARD} ${PORT}:${PORT} -n ${NAMESPACE}
     else
         print_status "Port forwarding is disabled"
     fi
@@ -115,17 +127,21 @@ cleanup_resources() {
     for model in "${MODEL_ARRAY[@]}"; do
         if [ -f "manifests/${model}.yaml" ]; then
             print_status "Removing ${model} model"
-            kubectl delete -f manifests/${model}.yaml --ignore-not-found=true
+            kubectl_cmd delete -f manifests/values/${model}.yaml --ignore-not-found=true
         fi
     done
 
     # Remove operator deployment
     print_status "Removing operator deployment"
-    kubectl delete -f manifests/deployment.yaml --ignore-not-found=true
+    kubectl_cmd delete -f manifests/operators/deployment.yaml --ignore-not-found=true
+
+    # Remove RBAC
+    print_status "Removing RBAC configuration"
+    kubectl_cmd delete -f manifests/operators/rbac.yaml --ignore-not-found=true
 
     # Remove CRD last
     print_status "Removing CRD"
-    kubectl delete -f manifests/crd.yaml --ignore-not-found=true
+    kubectl_cmd delete -f manifests/operators/crd.yaml --ignore-not-found=true
 
     print_status "Cleanup completed"
 }
@@ -149,6 +165,7 @@ main() {
     echo "Image: ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
     echo "Namespace: ${NAMESPACE}"
     echo "Models to deploy: ${MODELS}"
+    echo "Kubeconfig: ${KUBECONFIG}"
     if [ "${ENABLE_PORT_FORWARD}" = "true" ]; then
         echo "Port forwarding: ${PORT} for ${MODEL_FOR_PORT_FORWARD}"
     else
@@ -163,6 +180,7 @@ main() {
         print_status "Deployment cancelled"
         exit 1
     fi
+
     # Check if image exists locally
     if docker image inspect "${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >/dev/null 2>&1; then
         print_status "Image ${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} already exists locally, skipping build"
