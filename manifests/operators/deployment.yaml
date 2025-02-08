@@ -4,6 +4,8 @@ kind: Deployment
 metadata:
   name: ollama-operator
   namespace: default
+  labels:
+    app: ollama-operator
 spec:
   replicas: 1
   selector:
@@ -17,15 +19,35 @@ spec:
       serviceAccountName: ollama-operator
       containers:
       - name: operator
-        image: webcodes0071/ollama-operator:v0.0.1
+        image: webcodes0071/ollama-operator:latest
         imagePullPolicy: Always
         resources:
-          limits: 
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
             cpu: "250m"
-            memory: "128Mi" 
-          requests: 
-            cpu: "250m"   
-            memory: "128Mi"
+            memory: "256Mi"
+        env:
+        - name: KOPF_NAMESPACE
+          value: default
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        # Remove health probes since kopf operator doesn't expose health endpoints by default
+        # We'll rely on pod status instead
+        # ports:
+        # - containerPort: 11434
+        #   name: http
+        # readinessProbe:
+        #   tcpSocket:
+        #     port: 11434
+        #   initialDelaySeconds: 5
+        #   periodSeconds: 10
+        # livenessProbe:
+        #   tcpSocket:
+        #     port: 11434
+        #   initialDelaySeconds: 15
+        #   periodSeconds: 20
 ---
 apiVersion: v1
 kind: ServiceAccount

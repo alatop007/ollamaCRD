@@ -27,6 +27,9 @@ kubernetes.config.load_incluster_config()
 core_api = kubernetes.client.CoreV1Api()
 apps_api = kubernetes.client.AppsV1Api()
 
+DEPLOYMENT_TIMEOUT = 600  # 10 minutes
+SERVICE_TIMEOUT = 300    # 5 minutes
+
 def sanitize_label(value):
     """Sanitize a value to be used as a Kubernetes label.
     Only allows alphanumeric characters, '-', '_' or '.'"""
@@ -244,25 +247,44 @@ def wait_for_pod_ready(name, namespace, timeout=300):
 
 def wait_for_deployment_ready(name, namespace, timeout=300):
     """Wait for a deployment to be ready with exponential backoff."""
-    apps_api = kubernetes.client.AppsV1Api()
     start = time.time()
     backoff = 1
     max_backoff = 32
+    max_retries = 5  # Maximum number of retries for etcd timeouts
     logger = logging.getLogger(__name__)
 
     logger.info(f"Waiting for deployment {name} to be ready (timeout: {timeout}s)")
     while time.time() - start < timeout:
-        try:
-            deployment = apps_api.read_namespaced_deployment(name=name, namespace=namespace)
-            if deployment.status.ready_replicas == deployment.spec.replicas:
-                logger.info(f"Deployment {name} is ready")
-                return True
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                deployment = apps_api.read_namespaced_deployment(
+                    name=name,
+                    namespace=namespace
+                )
                 
-        except ApiException as e:
-            if e.status != 404:
-                logger.error(f"Error checking deployment status: {e}")
-                raise
-            logger.debug(f"Deployment {name} not found yet")
+                # Check if deployment is ready
+                if (deployment.status.ready_replicas is not None and 
+                    deployment.status.ready_replicas == deployment.spec.replicas):
+                    logger.info(f"Deployment {name} is ready")
+                    return True
+                break  # Break retry loop if no exception
+                
+            except ApiException as e:
+                if e.status == 500 and "etcdserver: request timed out" in str(e):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        logger.warning(f"Etcd timeout, retrying ({retry_count}/{max_retries})...")
+                        time.sleep(1)  # Short sleep before retry
+                        continue
+                    else:
+                        logger.error("Max retries reached for etcd timeout")
+                        raise
+                elif e.status != 404:
+                    logger.error(f"Error checking deployment status: {e}")
+                    raise
+                logger.debug(f"Deployment {name} not found yet")
+                break  # Break retry loop for 404
         
         wait_time = min(backoff, max_backoff)
         logger.debug(f"Waiting {wait_time}s before next check")
@@ -300,37 +322,51 @@ def create_fn(spec, name, namespace, logger, patch, **kwargs):
         # Create both deployment and service
         deployment, service = create_ollama_deployment(name, namespace, spec)
         
-        try:
-            # Create the deployment
-            created_deployment = apps_api.create_namespaced_deployment(
-                namespace=namespace, 
-                body=deployment
-            )
-            logger.info(f"Created deployment {created_deployment.metadata.name}")
-            
-            # Create the service with model-specific name
-            created_service = core_api.create_namespaced_service(
-                namespace=namespace,
-                body=service
-            )
-            logger.info(f"Created service {created_service.metadata.name}")
-            
-            patch.status['phase'] = 'Creating'
-            patch.status['deployment_name'] = created_deployment.metadata.name
-            patch.status['service_name'] = created_service.metadata.name
-            patch.status['model'] = spec['modelName']
-            patch.status['created_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
-            
-        except ApiException as e:
-            if e.status == 409:
-                logger.info(f"Deployment/Service for {name} already exists")
-                patch.status['phase'] = 'Exists'
-                return
-            logger.error(f"Failed to create deployment/service: {e}")
-            raise kopf.PermanentError(f"Failed to create deployment/service: {e}")
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Create the service first
+                created_service = core_api.create_namespaced_service(
+                    namespace=namespace,
+                    body=service
+                )
+                logger.info(f"Created service {created_service.metadata.name}")
+                
+                # Create the deployment
+                created_deployment = apps_api.create_namespaced_deployment(
+                    namespace=namespace, 
+                    body=deployment
+                )
+                logger.info(f"Created deployment {created_deployment.metadata.name}")
+                break
+                
+            except ApiException as e:
+                if e.status == 500 and "etcdserver: request timed out" in str(e):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        logger.warning(f"Etcd timeout, retrying ({retry_count}/{max_retries})...")
+                        time.sleep(2)  # Wait before retry
+                        continue
+                    else:
+                        logger.error("Max retries reached for etcd timeout")
+                        raise
+                elif e.status == 409:
+                    logger.info(f"Deployment/Service for {name} already exists")
+                    patch.status['phase'] = 'Exists'
+                    return
+                logger.error(f"Failed to create deployment/service: {e}")
+                raise kopf.PermanentError(f"Failed to create deployment/service: {e}")
+        
+        patch.status['phase'] = 'Creating'
+        patch.status['deployment_name'] = created_deployment.metadata.name
+        patch.status['service_name'] = created_service.metadata.name
+        patch.status['model'] = spec['modelName']
+        patch.status['created_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Wait for deployment to be ready
-        if not wait_for_deployment_ready(deployment.metadata.name, namespace):
+        # Wait for deployment to be ready with timeout
+        if not wait_for_deployment_ready(deployment.metadata.name, namespace, timeout=DEPLOYMENT_TIMEOUT):
             logger.error(f"Deployment {deployment.metadata.name} failed to become ready")
             cleanup_resources(deployment.metadata.name, namespace, logger)
             patch.status['phase'] = 'Failed'
