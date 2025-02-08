@@ -13,7 +13,7 @@ A Kubernetes operator for deploying and managing Ollama LLM models in your clust
 <!-- 7. make value.yaml deployment and able to specify replicas -->
 <!-- 8. ability to run local image and not pull from internet -->
 <!-- 9. model service as a deployment -->
-10. Allow KUBECONFIG to be passed in
+<!-- 10. Allow KUBECONFIG to be passed in -->
 11. Allow local model to be used
 
 ## Project Structure
@@ -21,17 +21,17 @@ A Kubernetes operator for deploying and managing Ollama LLM models in your clust
 ```
 .
 ├── controller.py                  # Main operator logic
-├── Dockerfile                    # Multi-stage build for operator
-├── deploy.sh                     # Deployment script
+├── Dockerfile                     # Multi-stage build for operator
+├── deploy.sh                      # Deployment script
 ├── manifests/
-│   ├── operators/               # Operator-related manifests
-│   │   ├── crd.yaml            # Custom Resource Definition
-│   │   ├── deployment.yaml     # Operator deployment
-│   │   └── rbac.yaml          # RBAC configuration
-│   └── values/                 # Model configurations
-│       ├── deepseek.yaml      # DeepSeek model config
-│       ├── mistral.yaml       # Mistral model config
-│       └── llama.yaml         # Llama model config
+│   ├── operators/                
+│   │   ├── crd.yaml               # Custom Resource Definition
+│   │   ├── deployment.yaml        # Operator deployment
+│   │   └── rbac.yaml              # RBAC configuration
+│   └── values/                  
+│       ├── deepseek.yaml          # DeepSeek model config
+│       ├── mistral.yaml           # Mistral model config
+│       └── llama.yaml             # Llama model config
 ```
 
 ## Prerequisites
@@ -48,7 +48,7 @@ A Kubernetes operator for deploying and managing Ollama LLM models in your clust
 The following environment variables can be configured:
 
 ```bash
-export IMAGE_TAG="v0.0.2"        # Version of the operator image
+export IMAGE_TAG="latest"        # Version of the operator image
 export NAMESPACE="default"       # Kubernetes namespace
 export MODELS="deepseek,llama"  # Comma-separated list of models to deploy
 export PORT="11435"             # Port for forwarding
@@ -206,7 +206,3 @@ kubectl --kubeconfig=$KUBECONFIG cluster-info
 2. Create your feature branch
 3. Make your changes
 4. Submit a pull request
-
-## License
-
-[Add your license information here]

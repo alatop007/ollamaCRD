@@ -1,6 +1,6 @@
 #!/bin/bash
 # Configuration vars
-export IMAGE_TAG="v0.0.2"        
+export IMAGE_TAG="latest"        
 export NAMESPACE="default"       
 export MODELS="deepseek,llama"  
 export PORT="11435"              
@@ -74,25 +74,46 @@ build_and_push() {
 
 # Deploy Kubernetes resources
 deploy_resources() {
-    print_status "Deploying CRD"
-    kubectl_cmd apply -f manifests/operators/crd.yaml
-
-    print_status "Setting up RBAC"
+    print_status "Setting up RBAC first"
     kubectl_cmd apply -f manifests/operators/rbac.yaml
 
     print_status "Deploying operator"
     kubectl_cmd apply -f manifests/operators/deployment.yaml
+    
     print_status "Waiting for operator pod to be ready..."
     while true; do
+        # Check both pod phase and container readiness
         POD_STATUS=$(kubectl_cmd get pods -l app=ollama-operator -n default -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
-        if [ "$POD_STATUS" = "Running" ]; then
-            print_status "Operator pod is running"
+        READY_STATUS=$(kubectl_cmd get pods -l app=ollama-operator -n default -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null)
+        
+        if [ "$POD_STATUS" = "Running" ] && [ "$READY_STATUS" = "true" ]; then
+            print_status "Operator pod is running and ready"
             break
         elif [ "$POD_STATUS" = "Error" ] || [ "$POD_STATUS" = "Failed" ]; then
             print_error "Operator pod failed to start"
+            print_error "Pod logs:"
+            kubectl_cmd logs -l app=ollama-operator -n default
             exit 1
+        else
+            print_status "Waiting for operator pod (Status: $POD_STATUS, Ready: $READY_STATUS)"
         fi
         sleep 5
+    done
+
+    # Add a small delay to ensure the operator is fully initialized
+    sleep 5
+
+    print_status "Deploying CRD"
+    kubectl_cmd apply -f manifests/operators/crd.yaml
+    
+    # Wait for CRD to be established
+    print_status "Waiting for CRD to be established..."
+    while true; do
+        if kubectl_cmd get crd ollamamodels.example.com &>/dev/null; then
+            print_status "CRD is established"
+            break
+        fi
+        sleep 2
     done
 
     # Deploy selected models
@@ -125,23 +146,27 @@ cleanup_resources() {
     # Remove model deployments first
     IFS=',' read -ra MODEL_ARRAY <<< "$MODELS"
     for model in "${MODEL_ARRAY[@]}"; do
-        if [ -f "manifests/${model}.yaml" ]; then
+        if [ -f "manifests/values/${model}.yaml" ]; then
             print_status "Removing ${model} model"
             kubectl_cmd delete -f manifests/values/${model}.yaml --ignore-not-found=true
         fi
     done
 
+    # Wait for models to be deleted
+    print_status "Waiting for models to be deleted..."
+    sleep 10
+
+    # Remove CRD
+    print_status "Removing CRD"
+    kubectl_cmd delete -f manifests/operators/crd.yaml --ignore-not-found=true
+
     # Remove operator deployment
     print_status "Removing operator deployment"
     kubectl_cmd delete -f manifests/operators/deployment.yaml --ignore-not-found=true
 
-    # Remove RBAC
+    # Remove RBAC last
     print_status "Removing RBAC configuration"
     kubectl_cmd delete -f manifests/operators/rbac.yaml --ignore-not-found=true
-
-    # Remove CRD last
-    print_status "Removing CRD"
-    kubectl_cmd delete -f manifests/operators/crd.yaml --ignore-not-found=true
 
     print_status "Cleanup completed"
 }

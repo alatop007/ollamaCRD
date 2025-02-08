@@ -10,21 +10,59 @@ kind: ClusterRole
 metadata:
   name: ollama-operator
 rules:
+# Core API permissions
 - apiGroups: [""]
-  resources: ["pods", "services", "events", "configmaps", "secrets"]
+  resources: ["pods", "services", "events", "configmaps", "secrets", "namespaces", "persistentvolumes", "persistentvolumeclaims"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Apps API permissions
 - apiGroups: ["apps"]
-  resources: ["deployments"]
+  resources: ["deployments", "replicasets", "statefulsets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Storage permissions
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+
+# Custom resource permissions
 - apiGroups: ["example.com"]
-  resources: ["ollamamodels", "ollamamodels/status"]
+  resources: ["ollamamodels", "ollamamodels/status", "ollamamodels/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# CRD permissions
 - apiGroups: ["apiextensions.k8s.io"]
   resources: ["customresourcedefinitions"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Basic cluster permissions
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+# RBAC permissions
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Coordination permissions for leader election
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Discovery and system permissions
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["system:nodes"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["system:serviceaccounts"]
+  resources: ["*"]
+  verbs: ["impersonate"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -38,4 +76,19 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: ollama-operator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# System role binding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ollama-operator-system
+subjects:
+- kind: ServiceAccount
+  name: ollama-operator
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: system:auth-delegator
   apiGroup: rbac.authorization.k8s.io 
