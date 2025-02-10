@@ -97,11 +97,19 @@ spec:
     name: deepseek-service
   resources:
     requests:
-      cpu: "4"
-      memory: "32Gi"
+      cpu: "500m"
+      memory: "256Mi"
     limits:
-      cpu: "8"
-      memory: "64Gi"
+      cpu: "500m"
+      memory: "256Mi"
+  image: "ollama/ollama:latest"
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
 ```
 
 2. Deploy using the script:
